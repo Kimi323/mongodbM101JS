@@ -1,0 +1,320 @@
+Final Exam Answers Explained
+neillunn
+3 days ago
+Since the answers required for the exam have no explanation of the code required to obtain them, here is a summary.
+
+Lab 0
+This lab should be quite simple if you have been following the course material and practicing samples given with lessons and homework. In order to answer the question presented all you need do in summary of the listed instructions on the lab were to:
+
+Extract the content of the provided archive into a working folder
+Run npm install only from within that working folder to install required dependencies with the correct versions as listed within the package.json.
+Run mongoimport for the supplied data files to populate the collections in the specified database to a running MongoDB instance.
+Run node mongomart.js in order to start the program and connect a local browser to http://localhost:3000 and view the page content displayed to answer the question.
+Everything in here really depends on you correctly following the npm install using the package.json content and NOT attempting to manually install dependencies as a core competency of working with nodeJS applications.
+
+Notably a few people seemed to take the lab instruction far too literally:
+
+Make sure you have a mongod running version 3.2.x of MongoDB
+
+This really was not required at all. The general course requirement was that you be running "at least MongoDB 3.2" since the course material does demonstrate features from that release. However nothing about the exam labs ( nor actually anywhere in the entire course homework ) actually **requires** you have "that specific version" and in fact you could easily complete running either an earlier or later version.
+
+The main thing always has been that the "code presented" in the course is compatible with a "specific driver version". So that is what you really needed to correctly install. Or at least from the perspective of running the "supplied code" unmodified. Which is in fact the best way to approach following the instruction.
+
+In the event that you had to this point obtained a 100% average for all homework scores ( including discarding the lowest week score ), then simply submitting the correct answer for this Lab from following the "set up" instructions correctly was enough to obtain a pass mark for the entire course.
+
+Lab 1
+This presented probably the most difficult section of the entire remaining lab questions you are asked to answer and is the only case which requires usage of the "aggregation framework" in order to answer, and indeed progress to other problems. There are also some parts of the question which are "technically optional" where if you did not complete them exactly as specified, then it did not really make a difference to the overall results.
+
+The specific lab requires you make alterations to the items.js file in the project and supply code to implement the getCategories(), getItems() and getNumItems() methods within that listing. NO OTHER FILES REQUIRE EDITING, and though there is mention of methods implemented in mongomart.js, you should not be touching the code within that source file at all.
+
+Lab 1A - The getCategories() method contains the comment defining what needs to be done to fulfill the lab requirements:
+
+Write an aggregation query on the "item" collection to return the total number of items in each category. The documents in the array output by your aggregation should contain fields for "_id" and "num".
+
+This along with the other "boilerplate" code included which you are meant to replace should give a pretty clear picture you are meant to return an Array of documents with the "_id" and "num" fields within the the callback response. There is some more instruction about what you are to return as well:
+
+In addition to the categories created by your aggregation query, include a document for category "All" in the array of categories passed to the callback. The "All" category should contain the total number of items across all categories as its value for "num". The most efficient way to calculate this value is to iterate through the array of categories produced by your aggregation query, summing counts of items in each category.
+
+Ensure categories are organized in alphabetical order before passing to the callback.
+
+The last line there tells you something which you should be applying to the aggregation query itself to "order" the output you return, and the preceding paragraph explains you are essentially expected to "prepend" the value of "All" to the returned array items where it's "num" actually counts "all items", and then goes on to "describe" what the simplest approach to doing this is:
+
+Not only the "simplest" approach, but it's probably best since you are not "increasing" the size of returned results from MongoDB with something you do not really need or even making an "additional request" to summarize since you already have the data in response. So you really should have code much like this:
+
+this.db.collection('item').aggregate([
+  { "$group": {
+    "_id": "$category",
+    "num": { "$sum": 1 }
+  }},
+  { "$sort": { "_id": 1 } }
+]).toArray((err,categories) => {
+  categories = [
+    { "_id": "All", "num": categories.reduce((acc,curr) => acc + curr.num, 0) },
+    ...categories
+  ];
+  callback(categories);
+})
+Without the ES6 referencing, then there is always Array.concat() as a method to join two arrays together:
+
+]).toArray(function(err,categories) {
+  categories = [].concat(
+    [{ "_id": "All", "num": categories.reduce((acc,curr) => acc + curr.num, 0) }],
+    categories
+  );
+  callback(categories);
+})
+Or even if you wanted to use Cursor.forEach():
+
+var categories = [];
+
+...
+]).forEach( category => {
+   categories.push(category);
+}, err => {
+  categories = [].concat(
+    [{ "_id": "All", "num": categories.reduce((acc,curr) => acc + curr.num, 0) }],
+    categories
+  );
+  callback(categories);
+})
+The main point of the exercise is to identify to use $group in order to obtain the "unique" category names and their counts, and then ideally $sort the results into alphabetical order. It is optional of course that the results be sorted in the aggregation pipeline instructions as you could obtain the results as an array and simply sort them afterwards in your JavaScript code.
+
+The other point to realize that something like "All" which is just the "total count" of the items valid for display can simply be obtained from "summing" the totals for each category that you already have, and there is no need to go back and ask the database to determine the total. You could do that, but it's not really efficient. Just as you also "could" implement a combined result using the $facet aggregation pipeline stage from MongoDB 3.4 and onwards:
+
+this.db.collection('item').aggregate([
+  { "$facet": {
+    "categories": [
+      { "$group": {
+        "_id": "$category",
+        "num": { "$sum": 1 }
+      }},
+      { "$sort": { "_id": 1 } }
+    ],
+    "all": [
+      { "$group": { "_id": "All", "num": { "$sum": 1 } } }
+    ]
+  }},
+  { "$project": {
+    "categories": { "$concatArrays": [ "$all", "$categories" ] }
+  }},
+  { "$unwind": "$categories" },
+  { "$replaceRoot": { "newRoot": "$categories" } }
+
+]).toArray((err,categories) => {
+But that is just really a fancy way to make the "server" run two queries and give you the output in a single response, so whilst better than making separate requests from the client, it's still more of a load than is needed.
+
+Another alternative is to "fold" the results in on itself to obtain the total:
+
+this.db.collection('item').aggregate([
+  { "$group": {
+    "_id": "$category",
+    "num": { "$sum": 1 }
+  }},
+  { "$sort": { "_id": 1 } },
+  { "$group": {
+    "_id": "All",
+    "categories": { "$push": { "_id": "$_id", "num": "$num" } },
+    "num": { "$sum": "$num" }
+  }},
+  { "$project": {
+    "_id": 0,
+    "categories": {
+      "$concatArrays": [
+        [{ "_id": "$_id", "num": "$num" }],
+        "$categories"
+      ]
+  }},
+  { "$unwind": "$categories" },
+  { "$replaceRoot": { "newRoot": "$categories" } }
+]).toArray((err,categories) => {
+But again though better than hitting the database again even from the server perspective, it's just really more work that is not necessary and is far more easily and efficiently expressed in client code.
+
+For my mind, it's generally best to return the list of categories and totals for each and then later simply obtain the total from the array with simple code as is done with the Array.reduce() method and again simply prepend that "total document" to the beginning of the array. This is really the "most involved" the lab answers actually get, and in actual truth the small list of links to categories this provides on the displayed page is not actually required in order to even answer the first lab or other labs.
+
+Lab 1B - This is where the actual items to be displayed on the page are returned from. The purpose of the exercise is essentially to write the code which considers the category given as input and returns the matching items, then based on other values passed to the function to pass those through to the skip() and limit() cursor modifiers and additionally sort() within a specified order. There is also the statement:
+
+Note: Since "All" is not listed as the category for any items, you will need to query the "item" collection differently for "All" than you do for other categories.
+
+This is actually prompting you realize that since there is no value of "All" recorded against any category property but it means "everything", that in this case you simply don't send any query condition at all:
+
+  this.getItems = function(category, page, itemsPerPage, callback) {
+    var query = {};
+
+    if (category !== "All")     // Only modify query where category is not All
+      query = { category };
+
+    this.db.collection('item').find(query)
+      .sort({ "_id": 1 })
+      .skip(page * itemsPerPage)
+      .limit(itemsPerPage)
+      .toArray((err,items) => {
+        if (err) console.error(err);
+        callback(items);
+      });
+  }
+If you are not familiar with the syntax then the { category } is basically ES6 shorthand for writing { "category": category } where the assigned key has the same name as the assigned variable. The actual .find() and other cursor operations are really straightforward, and the real part of the question is realizing to make that dynamic construction of the query object.
+
+Lab 1C - This is essentially the same task as the previous section. The only difference here is you .count() the cursor result instead of applying the other modifiers:
+
+this.getNumItems = function(category, callback) {
+  var query = {};
+
+  if (category !== "All")     // Only modify query where category is not All
+    query = { category };
+
+  this.db.collection('item').find(query).count((err,numItems) => {
+    if (err) console.error(err);
+    callback(numItems);
+  });
+
+}
+It's the same problem essentially except the solution is to return the "total count" for a given category or "All" as opposed to a "page of results" from the actual items collection documents.
+
+At the end of the day, these three pieces of code should be able to facilitate the actual question you are being asked:
+
+Select the "Apparel" category by clicking on it with your mouse. This category contains six products. MongoMart will paginate the products in this category into two pages. Which of the following items is listed on the second page? There should be only one item on this page
+
+If you coded all three of those functions correctly then you can follow those actions and view the correct product. Of course though you simply could have reasoned the logic was to "select items which belong to the 'Apparel' category, sort by _id then skip over five items and display the sixth ordered one".
+
+This is a very simple query, which you just wrote in three functions to handle clicks on a page:
+
+db.getCollection('item').find({ "category": "Apparel" }).sort({ "_id": 1 }).skip(5).limit(1)
+Therefore if you read the question, it was not hard to work out the query to issue without writing all the other code.
+
+Lab 2
+This time we want a "search" functionality in order to match a word within several possible fields in the item. Part of the instruction is in the question, and the other part is within the searchItems() method you are meant to implement:
+
+searchItems() depends on a text index. Before implementing this method, create a SINGLE text index on title, slogan, and description. You should simply do this in the mongo shell.
+
+This essentially means to start a shell and execute the following:
+
+db.getCollection('item').createIndex({ "title": "text", "slogan": "text", "description": "text" })
+Lab 2A - The actual searchItems() method really only needs to take the query parameter which is passed into the function and use it with the $text query operator:
+
+this.searchItems = function(query, page, itemsPerPage, callback) {
+  this.db.collection('item').find({ "$text": { "$search": query } })
+    .sort({ "_id": 1 })
+    .skip(page * itemsPerPage)
+    .limit(itemsPerPage)
+    .toArray((err,items) => {
+      if (err) console.error(err);
+      callback(items);
+    })
+}
+This has exactly the same usage of .sort(), .limit() and .skip() as was done in the previous lab. There is no conditional selection of the query to be made ( you could but don't really need it here ) and once you created the index correctly ( which would seem to be the main point of the lab ) it's just making sure the parameter passed in is used in the query with the correct operator syntax.
+
+Lab 2B - Just as in the previous lab the getNumSearchItems() simply implements .count() in place of the other modifiers:
+
+this.getNumSearchItems = function(query, callback) {
+  this.db.collection('item').find({ "$text": { "$search": query } })
+    .count((err,numItems) => {
+      if (err) console.error(err);
+      callback(numItems);
+    });
+}
+The actual point of Lab 2 is simply to search for the phrase "leaf" within the fields you defined in the text index earlier, as such the "number of matching products" should be displayed on the page along with the actual page of items when you type that into the search field within the header section of the rendered page.
+
+Or of course you can simply read the instruction and issue the query directly to the shell:
+
+db.getCollection('item').find({ "$text": { "$search": "leaf" } }).count()
+Lab 3
+The function of this lab is to implement the getItem() method. All that is being asked here is that this method is going to have a parameter passed in for itemId, so we really just need to query and return for this one matching document.
+
+Simply use the findOne() method:
+
+this.db.collection('item').findOne({ "_id": itemId }, (err, item) => {
+  callback(item);
+});
+If you went to using .toArray() and slicing off the first array item, then it's really not necessary. If you added .limit() as a modifier even then, it's still really not necessary since you still get an array.
+
+If you read one of the "challenge" answers posted which uses .next() and called that method only once on the opened cursor then, DO NOT DO THAT as leaving a cursor open an incomplete is extremely bad practice and you should never follow that example. Your application will leak memory badly and that means bad performance.
+
+Use the .findOne() method when you mean one document in result. And really you could simply have looked at the collection and the document detail for the one named "Track Jacket".
+
+The actual question after implementing the method or simply looking at the matching item in the collection is based on some statements about the web page as viewed, but can easily be determined by simply looking at the document. The true statements are:
+
+There are three reviews which should be visible as array members even when not displayed on the page.
+Jorge's is the last item in that reviews array
+And that's it. As for the other statement which are false:
+
+You can look at the image which is matched to the product and see the statement is clearly false.
+None of the review dates are in 2015
+Though the document itself does not have the "average" review score, it's fairly simple to look at the three review scores and work out the average even without feeding the data to the page to render.
+Lab 4
+This is about "adding a review" to the existing array of reviews on the item. This is essentially testing your understanding of .update() usage and of course the $push operator. Of course the slight wrinkle here is .update() does not actually return the document once it has been modified. But .findOneAndUpdate() does, and this is really what you where expected to have learned and understand:
+
+this.addReview = function(itemId, comment, name, stars, callback) {
+
+  var reviewDoc = {
+      name: name,
+      comment: comment,
+      stars: stars,
+      date: Date.now()
+  };
+
+  this.db.collection('item').findOneAndUpdate(
+    { "_id": itemId },
+    { "$push": { "reviews": reviewDoc } },
+    { "returnOriginal": false },
+    (err,item) => {
+      callback(item);
+    }
+  );
+}
+Of course there the other important part to the basic syntax of the method and the update modifier is to include the "returnOriginal" option which overrides the default action which would actually return the "original" and "unmodified" document before the new array item is added.
+
+The actual question however asks you to report "how many stars" are displayed after you add a 5 star review to the existing 3 reviews. This is of course simply the average as the sum of the existing scores plus 5 divided by 4. In the last question you determined that the product in question had less than 4 stars as an average. So when you add a score of 5 and get the new average, the concluded results should be pretty clear.
+
+Lab 5
+There is very little to this, and just like the getItem() method of Lab 3 we simply want .findOne() and the provided parameter value to return it. So all you do is fill in the getCart() method within cart.js:
+
+To really simplify the whole exercise, there is only one item in the whole cart collection anyway.
+
+For the actual answer to the question asked, the cart will be rendered on the page and show a total amount for all the items within it. You can also simply run a quick aggregation or other code and sum up the price of items within the array multiplied by their quantity, as this is all the code rendering the page is doing ( summing the array in JavaScript code that is ). Despite the warning on the question:
+
+Which of the following values is closest to the total value of items in the cart REPORTED ON THAT PAGE?
+
+There's nothing special in the code "reporting" the total. And it's simply the quantity multiplied by the price and added together for all items.
+
+Lab 6
+Though scratched from the "exam proper" and presented as a "challenge", this did not stop an answer being posted at the same time as the question. The answer presented however is incorrect and not how you should code the method. Here is how you code the method:
+
+this.itemInCart = function(userId, itemId, callback) {
+  this.db.collection('cart').findOne(
+    {  userId, "items._id": itemId },
+    { "items.$": 1 },
+    (err, item) => {
+      if (item != null)
+        item = item.items[0];
+      callback(item);
+    }
+  )
+}
+The point here should have been that you understood how to use projection to just return only the matching item from the cart and also with the query conditions which would mean that if the item was not in the cart, then the query itself would return null for the result.
+
+As mentioned earlier, NEVER leave a cursor with unprocessed results. There is a method for returning a single document as a result, and you should actually use it.
+
+Lab 7
+The answer approach as shown on the lab is actually the correct approach. Personally I would use a ternary operation to assign the updateDoc value as it's a lot less typing and pretty clear code anyone should be able to understand:
+
+var updateDoc = (quantity === 0)
+  ? { "$pull": { items: { _id: itemId } } }
+  : { "$set": { "items.$.quantity": quantity } };
+Again the main lesson here was about "positional" matching from the query in the update statement to set the quantity on the correct item. Of course you also were intended to recognize that "remove an item from the cart by setting the quantity to 0" meant to "conditionally" select whether you were using $set or $pull for the operation, just as shown in the block above.
+
+Next Steps
+Once you know you have a clear understanding of all the concepts presented in the exam labs and the course content in general then there are probably a few exercises you can adapt from the "mongomart" code given as a common practice of "refactoring" the existing code towards several new goals.
+
+The code "masks" errors which can be produced. Change the implementation of the DAO sections to pass any error in the callback response and handle error messages in the routes instead. You need only log errors to console, but you might consider a "developer mode" where you would report errors on a web page as well.
+
+Consider refactoring the code to use Promises. Promises are a modern way to avoid nested callback calls and make the code cleaner and easier to read and maintain. Consider then refactoring the base Promise implementation to use the async/await keywords available in modern JavaScript environments and current Long Term Support NodeJS releases.
+
+Add routes for a JSON API which simply returns all required data for the "pages" rather than rendering templates.
+
+See if you can find more possible uses for the $facet aggregation pipeline stage in providing data.
+
+Use the JSON API you developed as the back end source for a Single Page Web Application (SPA) or other port of the application display presentation.
+
+Look at implementing all the API part using [Stitch][1]
+
+Taking an existing application and looking at refactoring points just as outlined above is a great way to learn languages, frameworks and specific API's. In addition to the suggested "pathway" outlined above, you can also think of new "features" to add and the different components you need in order to implement them.

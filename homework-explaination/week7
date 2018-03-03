@@ -1,0 +1,80 @@
+Week 7 - Homework Answers Explained
+neillunn
+3 days ago
+Since the Homework answers for this section lacks videos and explanation of the correct answers, here's a summary of why the correct choices answer each question.
+
+Homework 7.1
+The question stated is :
+
+Which of the following statements are true about replication in MongoDB? Check all that apply
+
+From the five available choices, only the following two statements are correct:
+
+The minimum number of sensible voting nodes to a replica set is three
+The oplog utilizes a capped collection
+As is pointed out in the lessons and within the documentation, any replica set requires that in the event of an election for a primary there must be enough members to obtain an "majority" vote to determine which member becomes the new primary. Therefore the minimum number of nodes which is sensible in order to maintain a majority is three. This allows for the case where the current "primary" is deemed unreachable that at least two nodes can agree to this and then decide which of them becomes the new primary.
+
+Whilst you can possibly have a replica set with less members, it is not possible for a single remaining node to consider it "absolute truth" that the previous known "primary" is in fact "unreachable" and therefore cannot definitively promote itself to a primary. That's a basic truth of replication "failover". You can therefore have less nodes, but since with less nodes there is no way for that other node to promote itself to primary then it's not really sensible for production use.
+
+The oplog is of course a capped collection where older entries will be removed as newer ones are added, according to the server settings for the overall oplog size. This is therefore a true statement.
+
+The other statements are all false:
+
+MongoDB replication is synchronous
+Which is not true since that would mean that every operation recorded in the oplog would need to be written to every member of the replica set before anything else would continue. At the most basic level the "acknowledgement" of such things is in fact "tunable" and really even when asking for acknowledgement from a majority of members the collection is indeed asynchronous at it's core.
+
+By default using the MongoClient connection class, w=1 and j=1.
+This is false since the actual default values are w=1 being the "write concern" value for "acknowledged" from the primary node being written to, however the "journal" value is j=0 which means that the "journal" is not in fact written to by default settings.
+
+Note here that "MongoDB operations journal" and "Wired Tiger Journal" are two different things, in the event that you did some reading up and found some information on the Wired Tiger storage engine itself. There is more detail in the lessons and available in documentation and various presentations on the topic if you are interested.
+
+Homework 7.2
+Let's suppose you have a five member replica set and want to assure that writes are committed to the journal and are acknowledged by at least 3 nodes before you proceed forward. What would be the appropriate settings for w and j?
+
+This is multiple choice where there is only 1 correct selection:
+
+w="majority", j=1
+For the other choices, any which suggest w=1 of course will only mean acknowledgement from the "primary" node, and therefore discounts gaining acknowledgement from any other nodes in the replica set. Setting w=5 or even w=3 is not only overkill but is actually quite dangerous, since there very well could be valid cases where the replica set may have a number of "active" nodes which is less than the acknowledged number. So in the event where there is "less than 5" or "less than 3" respectively, then the acknowledgement will never actually be returned and the operation will likely time out.
+
+The other consideration of course is to ".. assure that writes are committed to the journal .." the setting must be j=1 to be a valid answer. So discounting the other setting on w=5 as being "unsafe", then the only valid setting must be w="majority", j=1.
+
+Homework 7.3
+Which of the following statements are true about choosing and using a shard key? Check all that apply.
+
+Again this requires multiple selections, and the only true statements here are:
+
+There must be an index on the collection that starts with the shard key
+MongoDB cannot enforce unique indexes on a sharded collection other than the shard key itself or indexes prefixed by the shard key
+Any single update that does not contain the shard key or _id field will result in an error
+And the remaining statement are false:
+
+The shard key must be unique
+You can change the shard key on a collection if you desire.
+So covering the false statements first, the first statement that the "shard key must be unique" is not true. It's often a misconception as in a number of cases you would want the shard key to be unique and quite often because you want a "unique" index on the collection and the shard key is actually the only place this would be valid.
+
+However it is not actually a "requirement", and something like "surname" is quite often a valid choice for a shard key depending on the usage pattern of the application, and of course "people" quite often share the same surname, or other like information. Therefore even though it's often "desirable", it is not something that is actually "enforced" since there are perfectly valid cases where you do not require the key to be unique for the purpose of shard distribution.
+
+The other false statement is quite clearly documented on any topic on sharding with MongoDB being "the shard key is Immutable", which means it cannot be changed. Just like you can cannot change the "primary key" in a document without completely rewriting the remaining content, the key which governs the distribution of shard data can never be changed once established. So this choice needs to be made carefully as if you decide this needs to change it effectively means migrating the collection data and establishing a new collection and shard key for the new pattern. Sharding or "scaling out" is then typically best left to when you have a more clear picture of your application data access patterns.
+
+As for the correct choices, the shard key must be derived from an existing index on the collection. It's just a rule and there is presently no assumption that specifying a property ( or properties ) as the shard key will go and create an index for you. Sharding requires "planning" as mentioned earlier, so it is expected you already have an index on the information which is valid for "lookup".
+
+MongoDB cannot enforce uniqueness across shards unless that is part of the shard key and distribution pattern itself. In a "nutshell", the data for "shards" lives on different servers ( or replica set clusters ) which makes it entirely impractical ( if not logically impossible ) to enforce uniqueness by going and asking "all shards" if the value is truly "unique". When it's part of the "key" this is okay, since there already is some governance that a shard expects values within a "range" to be in a particular place. Otherwise it goes against the goals of sharding, is not supported and therefore is true that MongoDB does not do this.
+
+The last point is a little tricky since the key word here is "single". This is presented in the course videos and you can easily test this since presuming you used the "a" property in documents as the shard key, then doing this is perfectly fine:
+
+collection.update({ "a": 1, "b": 2 },{ "$set": { "c": 3 } })
+This is because we used "a": 1 which provides a value for the shard key which tells the router which shard to send the statement to in order to modify the "document" ( or "documents" if `"multi" was provided ) and this can be done in an optimal way.
+
+However if instead we did not supply any value for "a":
+
+collection.update({ "b": 2 },{ "$set": { "c": 3 } })
+This presents a problem since the router is not actually able to determine where the instruction can be sent to, and noting here that with the provided arguments this will only "update" a single document. This in fact produces an error to the effect of telling you that you cannot apply such a single update without specifying a value for match on the "shard key" in the query argument to the statement.
+
+The alternate case of course to this is to allow the expression to effect "multiple" documents by adding the { "multi": true } option to the statement:
+
+collection.update({ "b": 2 },{ "$set": { "c": 3 } },{ "multi": true })
+The difference here is that you are "explicitly asking" the router to send the statement to "all shards" where you are expecting it to have an effect on multiple documents. This is in place since it really is not logical to send such a request out to "all shards" unless you really intended it to alter documents which are likely to reside on different shards. Therefore the point of the error is to stop you from doing something which does not really make any sense.
+
+Of course in modern API releases, the .updateMany() method is preferred as it has such "explicit naming" that you should surely be clear about intention to update "many" documents with the statement. That said, there is nothing stopping you from issuing a query condition which would only select a single document, but for the purposes of the question and the statement it really means the application of { "multi": true } as an explicit option, which is automatically applied for you "underneath" by the API method:
+
+collection.updateMany({ "b": 2 },{ "$set": { "c": 3 } })
